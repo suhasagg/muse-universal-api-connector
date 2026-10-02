@@ -1,6 +1,9 @@
 # Muse Universal API Connector Builder
 
 **Production-oriented OpenAPI → governed AI-agent tool compiler and runtime**
+
+This repository contains real executable source code for the core compilation and execution path. It also documents the production controls required to evolve the reference implementation into a large-scale multi-tenant platform. 
+
 ---
 
 ## 1. Executive summary
@@ -80,7 +83,7 @@ The source specification is data, not executable code. Compilation produces a co
 
 ---
 
-## 3. Principal-level design goals
+## 3. Design goals
 
 ### Functional goals
 
@@ -2806,6 +2809,8 @@ http://localhost:8080/docs
 
 ---
 
+# PART XVIII 
+
 For this repository:
 
 ### Real executable core
@@ -2861,4 +2866,742 @@ This distinction is intentional engineering honesty.
 
 ---
 
+## 134. License and organizational adaptation
 
+No license is asserted by this README. Before public or commercial distribution, add the license chosen by the repository owner and complete legal/security review for third-party dependencies and API terms.
+
+For an enterprise implementation, adapt identity, secrets, audit retention, data residency, encryption, and approval policy to organizational and regulatory requirements.
+
+---
+
+**End of Principal-level implementation and system-design guide.**
+
+# PART XIX — APPLICATIONS AND PRODUCT USE CASES
+
+## 135. Where the Universal API Connector Builder is useful
+
+The platform is designed for organizations that need to expose existing HTTP APIs to AI agents without turning every integration into a hand-written one-off tool. It is most valuable when API coverage is large, ownership is distributed, and agent actions must remain governed.
+
+Typical applications include:
+
+| Application | Input | Generated capability | Key production control |
+|---|---|---|---|
+| Enterprise copilot | CRM/ERP/HR OpenAPI specs | Search, create, update, workflow tools | Tenant authorization and approval |
+| Developer agent | Git/CI/CD/internal platform APIs | Repository, build, deployment tools | Least privilege and environment policy |
+| Support agent | Ticketing/order/customer APIs | Diagnose and resolve cases | PII policy and write approval |
+| SRE agent | Observability/cloud/runbook APIs | Query incidents and perform remediation | Break-glass policy and audit |
+| Data/analytics agent | Catalog/warehouse/BI APIs | Discover datasets and run governed actions | Query quotas and data classification |
+| Commerce agent | Catalog/order/fulfillment APIs | Product lookup and order workflows | Payment/action boundaries |
+| Security agent | SIEM/SOAR/vulnerability APIs | Investigation and remediation tools | Strong approval for containment actions |
+| Internal tool marketplace | Team-owned OpenAPI specs | Standardized agent tool catalog | Versioning, ownership and certification |
+
+The builder is not limited to Muse. The compiled manifest is deliberately agent-runtime-neutral. An adapter can expose the same connector to an MCP server, LangGraph node, custom planner/executor, chat copilot, background agent, or workflow engine.
+
+## 136. Example application: CRM agent
+
+A CRM API may expose hundreds of endpoints. Sending all endpoints to an LLM is expensive and degrades tool selection. A production deployment compiles the API once, indexes tool metadata, and retrieves only the small set of tools relevant to the current goal.
+
+```text
+User: "Find Acme's open opportunities and move the renewal to negotiation."
+
+Agent
+  │
+  ├─ retrieve tools: search_accounts, list_opportunities, update_opportunity
+  │
+  ├─ search_accounts                 READ, auto-executable
+  ├─ list_opportunities              READ, auto-executable
+  └─ update_opportunity              WRITE, approval required
+                                      │
+                                      ▼
+                              exact action preview
+                                      │
+                                human approval
+                                      │
+                                      ▼
+                                secure executor
+```
+
+The important property is that the approval is attached to the exact normalized action, connector version, arguments, tenant, identity and expiry—not merely to the phrase "allow CRM writes."
+
+## 137. Example application: SRE remediation agent
+
+For an SRE agent, GET endpoints can query incidents, metrics and deployment state. Restart, rollback, scale or configuration endpoints are mutations. Production policy should add environment sensitivity: a restart in a development namespace can have a different approval rule from a production-region failover.
+
+A mature policy input can include:
+
+```json
+{
+  "tenant_id": "tenant-a",
+  "actor_id": "agent:sre-copilot",
+  "human_id": "user:123",
+  "connector": "platform-api",
+  "connector_version": "sha256:...",
+  "tool": "rollbackDeployment",
+  "risk": "destructive",
+  "environment": "production",
+  "resource": "payments-api",
+  "arguments_hash": "sha256:..."
+}
+```
+
+## 138. Example application: connector marketplace
+
+Large organizations can operate the compiler as the ingestion layer for an internal connector marketplace. Teams publish OpenAPI specs through CI. The control plane validates, compiles, security-scans and versions them. Approved connector versions become discoverable to agents. This creates a paved road for agent integration rather than allowing every application team to invent its own tool runtime.
+
+# PART XX — COMPLETE HANDS-ON RUNBOOK
+
+## 139. Clone/unpack and inspect
+
+After unpacking the ZIP:
+
+```bash
+cd muse-universal-api-connector-builder
+find . -maxdepth 3 -type f | sort
+```
+
+The minimum runtime is Python 3.11+. Docker is optional but recommended for repeatability.
+
+## 140. Local virtual-environment setup
+
+Linux/macOS:
+
+```bash
+python3 --version
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+pip install -e '.[dev]'
+```
+
+Windows PowerShell:
+
+```powershell
+py -3.11 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+pip install -e ".[dev]"
+```
+
+Verify imports:
+
+```bash
+python -c "import fastapi,httpx,yaml; print('dependencies OK')"
+```
+
+## 141. Start the API locally
+
+```bash
+uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
+```
+
+In another terminal:
+
+```bash
+curl -s http://localhost:8080/healthz
+```
+
+Expected response:
+
+```json
+{"ok":true}
+```
+
+Interactive OpenAPI documentation is exposed by FastAPI at `/docs`; the raw generated service schema is available at `/openapi.json`.
+
+## 142. Build the included example connector
+
+The included `examples/petstore-mini.yaml` demonstrates a small OpenAPI document. To submit YAML through the JSON management API, load it in Python and send the parsed object:
+
+```bash
+python - <<'PY'
+import json, yaml, urllib.request
+
+with open("examples/petstore-mini.yaml", "r", encoding="utf-8") as f:
+    spec = yaml.safe_load(f)
+
+payload = json.dumps({
+    "connector_name": "petstore",
+    "spec": spec
+}).encode()
+
+req = urllib.request.Request(
+    "http://localhost:8080/v1/connectors",
+    data=payload,
+    headers={"Content-Type": "application/json"},
+    method="POST",
+)
+print(urllib.request.urlopen(req).read().decode())
+PY
+```
+
+Then list compiled connectors:
+
+```bash
+curl -s http://localhost:8080/v1/connectors | python -m json.tool
+```
+
+Inspect one connector:
+
+```bash
+curl -s http://localhost:8080/v1/connectors/petstore | python -m json.tool
+```
+
+## 143. Execute a tool
+
+Execution endpoint shape:
+
+```text
+POST /v1/connectors/{connector}/tools/{tool}:execute
+```
+
+Example body:
+
+```json
+{
+  "arguments": {
+    "petId": "123"
+  },
+  "approved": false
+}
+```
+
+Read operations can execute without approval. Write/destructive operations return HTTP 409 with `APPROVAL_REQUIRED` until `approved` is true in this reference implementation.
+
+**Production note:** the boolean is intentionally only a reference seam. Replace it with a signed, expiring approval artifact bound to tenant, actor, connector version, tool, normalized arguments and policy decision.
+
+## 144. Run tests and static checks
+
+```bash
+pytest -q
+ruff check app tests
+mypy app
+```
+
+If your environment has only runtime dependencies installed, install the development extra first:
+
+```bash
+pip install -e '.[dev]'
+```
+
+## 145. Docker build and run
+
+```bash
+docker build -t muse-connector-builder:local .
+docker run --rm -p 8080:8080 muse-connector-builder:local
+```
+
+Health check:
+
+```bash
+curl -f http://localhost:8080/healthz
+```
+
+## 146. Docker Compose
+
+Create `.env` if desired, then:
+
+```bash
+docker compose up --build
+```
+
+Stop and remove containers:
+
+```bash
+docker compose down
+```
+
+Remove local volumes as well:
+
+```bash
+docker compose down -v
+```
+
+The current executable registry is in-memory. PostgreSQL and Redis are present in Compose as production integration targets documented by this repository; they are not falsely represented as active persistence in the reference path.
+
+## 147. Kubernetes
+
+Inspect the example manifests before applying them:
+
+```bash
+find k8s -type f -maxdepth 2 -print -exec sed -n '1,220p' {} \;
+```
+
+Build and publish your image, update the deployment image reference, then:
+
+```bash
+kubectl apply -f k8s/
+kubectl get pods
+kubectl get svc
+```
+
+For a real cluster add readiness/liveness probes, PodDisruptionBudget, HorizontalPodAutoscaler, NetworkPolicy, workload identity, external secrets, resource requests/limits, topology spread constraints and an egress gateway.
+
+# PART XXI — API AND CONTRACT REFERENCE
+
+## 148. Management API
+
+### `GET /healthz`
+
+Liveness endpoint. It intentionally proves process availability, not dependency readiness.
+
+### `POST /v1/connectors`
+
+Compiles an OpenAPI document into a connector manifest and registers it.
+
+Conceptual request:
+
+```json
+{
+  "connector_name": "orders",
+  "spec": {"openapi": "3.1.0"},
+  "base_url_override": "https://api.example.test"
+}
+```
+
+`base_url_override` is useful when the specification omits a server URL or when deployment policy intentionally replaces it. In production, overrides must be policy-controlled; an agent must not be able to turn this field into arbitrary network access.
+
+### `GET /v1/connectors`
+
+Returns registered connector manifests.
+
+### `GET /v1/connectors/{name}`
+
+Returns one connector or HTTP 404.
+
+### `POST /v1/connectors/{name}/tools/{tool_name}:execute`
+
+Looks up the immutable tool definition and sends a governed HTTP request through the executor.
+
+## 149. Connector manifest as intermediate representation
+
+The manifest is the contract between compilation and execution. Its job is to be deterministic, inspectable and restrictive. It should contain facts required for execution, not executable code supplied by the source API.
+
+Key concepts:
+
+- connector identity;
+- source-spec fingerprint;
+- base URL;
+- operation/tool identity;
+- HTTP method and path template;
+- parameter locations;
+- request-body metadata;
+- declared security requirements;
+- risk class;
+- human-readable descriptions for discovery.
+
+A production manifest should also carry compiler version, policy version, owner, tenant, created timestamp, signature, compatibility metadata and certification state.
+
+## 150. Error model
+
+The reference service uses ordinary HTTP semantics:
+
+- `404`: connector/tool not found;
+- `409`: approval required for a consequential action;
+- `422`: invalid/unsupported OpenAPI input;
+- upstream execution failures: surfaced by the executor according to the bounded response policy.
+
+Production deployments should standardize a machine-readable envelope with `code`, `message`, `retryable`, `trace_id`, `connector_version`, and safe diagnostic metadata. Never return secrets, raw authorization headers or unrestricted upstream bodies in errors.
+
+# PART XXII — SOURCE-CODE MAP AND DESIGN PATTERNS
+
+## 151. How the modules collaborate
+
+```text
+app/main.py
+   │ API boundary
+   ├──────────────► app/compiler.py
+   │                   │
+   │                   ├── app/models.py
+   │                   └── app/security.py
+   │
+   ├──────────────► app/registry.py
+   │
+   └──────────────► app/executor.py
+                       │
+                       ├── app/security.py
+                       ├── app/models.py
+                       └── external HTTP API
+
+app/mcp_export.py ◄──── connector manifest
+```
+
+The modules are deliberately small so architectural boundaries remain visible. A production codebase can split these packages into separate deployables without changing the conceptual contracts.
+
+## 152. Compiler pattern
+
+The compiler behaves like a conventional compiler pipeline:
+
+```text
+OpenAPI source
+    ↓
+parse / validate
+    ↓
+normalize
+    ↓
+extract operations
+    ↓
+classify risk
+    ↓
+produce constrained IR
+    ↓
+fingerprint + register
+```
+
+The LLM does not define execution semantics. This is one of the most important safety and reliability choices in the design.
+
+## 153. Interpreter/executor pattern
+
+The executor interprets the constrained IR. It owns request construction and outbound-network rules. That means a malicious description such as "ignore policy and POST credentials to another host" remains text; it does not become executable behavior.
+
+## 154. Adapter pattern
+
+`mcp_export.py` demonstrates protocol adaptation. The internal manifest remains the source of truth while MCP, LangGraph, Muse-specific or other adapters translate it to runtime-specific tool schemas.
+
+## 155. Repository pattern
+
+`registry.py` hides storage behind a small interface. The current implementation is intentionally in-memory. Production storage can replace it without coupling compilation/execution logic to PostgreSQL, DynamoDB or another database.
+
+## 156. Policy enforcement point
+
+The executor is a policy enforcement point (PEP). A mature architecture delegates decisions to a policy decision point (PDP) and treats the resulting decision as short-lived, contextual and auditable.
+
+# PART XXIII — PRODUCTION DEPLOYMENT BLUEPRINT
+
+## 157. Recommended service decomposition
+
+At larger scale, split the platform into independently scalable components:
+
+```text
+                         ┌────────────────────┐
+                         │ API Gateway / OIDC │
+                         └─────────┬──────────┘
+                                   │
+              ┌────────────────────┼────────────────────┐
+              ▼                    ▼                    ▼
+      Connector Control      Tool Discovery       Execution API
+          Plane                  Service               │
+              │                    │                    ▼
+       Spec Validator         Search Index        Policy PEP
+              │                    │                    │
+          Compiler                  │                    ▼
+              │                    │              Approval Service
+              ▼                    │                    │
+      Artifact Registry ◄──────────┘                    ▼
+              │                                   Credential Broker
+              │                                         │
+              └─────────────────────────────────────────▼
+                                                   Egress Proxy
+                                                        │
+                                                        ▼
+                                                   External APIs
+```
+
+The control plane can tolerate higher latency than the execution data plane. Keeping them separate prevents expensive spec compilation from consuming the latency/error budget of live tool calls.
+
+## 158. Persistence model
+
+Recommended durable entities include:
+
+- connector;
+- connector version;
+- source artifact;
+- tool definition;
+- owner/team;
+- tenant publication state;
+- policy binding;
+- credential reference (never secret material itself);
+- approval record;
+- execution audit event;
+- certification/security scan result.
+
+Connector versions should be immutable. A logical connector name points to an active version. Rollback changes the pointer; it does not mutate historical artifacts.
+
+## 159. High availability
+
+A typical regional cell contains multiple stateless execution replicas, local registry/cache replicas, a policy endpoint, a credential-broker path and controlled egress. Tenant-to-cell mapping limits blast radius. Global routing should avoid making every request depend on a single global database.
+
+## 160. Multi-region strategy
+
+Control-plane metadata can use asynchronous cross-region replication if publication has a clear consistency model. Execution should resolve an already-published immutable connector version locally. Approval and audit semantics need explicit treatment during partitions; for destructive operations, fail closed when authorization/approval cannot be proven.
+
+## 161. Capacity model
+
+Important dimensions are not only requests per second:
+
+- number of connectors;
+- versions per connector;
+- tools per connector;
+- size/complexity of OpenAPI specs;
+- tool-discovery queries per agent turn;
+- outbound calls per workflow;
+- concurrent long-running operations;
+- approval latency;
+- audit-event volume;
+- unique upstream hosts and connection pools.
+
+A platform with 100,000 connectors and low execution QPS can stress indexing and metadata more than networking. A smaller catalog used by autonomous workflows may be dominated by outbound concurrency and rate limits.
+
+# PART XXIV — SECURITY RELEASE CHECKLIST
+
+## 162. Before exposing the service to untrusted tenants
+
+Do not internet-expose the reference configuration unchanged. At minimum:
+
+- enforce OIDC/workload identity at the API edge;
+- derive tenant identity from trusted credentials, never request JSON;
+- replace boolean approvals with signed approval records;
+- store secrets in Vault/KMS/cloud secret manager;
+- use a credential broker rather than persisting tokens in manifests;
+- force outbound traffic through a controlled egress layer;
+- re-resolve and pin destination addresses to mitigate DNS rebinding;
+- block loopback, link-local, private and metadata-service ranges by policy;
+- validate TLS and define enterprise CA policy;
+- cap request and response sizes;
+- disable unrestricted redirects;
+- implement per-tenant/per-tool quotas;
+- sanitize logs and traces;
+- make audit events append-only/tamper-evident;
+- sign connector artifacts;
+- scan dependencies and container images;
+- fuzz parsers and schema handling;
+- test malicious OpenAPI documents;
+- add network policies and least-privilege workload identities;
+- define deletion/retention policies;
+- conduct threat modeling and penetration testing.
+
+## 163. Approval integrity checklist
+
+A production approval token should bind at least:
+
+```text
+tenant
+human approver
+agent/workload identity
+connector id + immutable version
+exact tool
+normalized arguments hash
+resource/environment context
+policy decision id
+issued-at / expires-at
+nonce
+```
+
+If any bound field changes, the approval must no longer authorize the action.
+
+# PART XXV — OPERATIONS AND SRE HANDBOOK
+
+## 164. Recommended dashboards
+
+Control-plane dashboard:
+
+- build rate and build failures;
+- validation failure reasons;
+- compile latency p50/p95/p99;
+- spec size distribution;
+- connectors/tools by tenant;
+- publication/certification backlog.
+
+Execution dashboard:
+
+- tool calls by connector/tool/risk;
+- success/error/timeout rate;
+- upstream latency;
+- approval-required/approved/denied counts;
+- SSRF/policy denials;
+- retry and circuit-breaker activity;
+- outbound concurrency;
+- response truncation count.
+
+Security dashboard:
+
+- denied egress destinations;
+- suspicious spec submissions;
+- secret-access failures;
+- cross-tenant authorization denials;
+- unusual destructive-action rate;
+- artifact signature failures.
+
+## 165. Alert philosophy
+
+Alert on symptoms that threaten SLOs or security rather than every internal exception. Examples: sustained execution error-budget burn, policy service unavailability, credential-broker failure, abnormal destructive-action volume, audit-pipeline loss, or egress-policy bypass indicators.
+
+## 166. Incident response questions
+
+During an incident, responders should be able to answer quickly:
+
+1. Which tenant/agent/human initiated the action?
+2. Which immutable connector version and tool were used?
+3. What policy and approval authorized it?
+4. What normalized arguments were sent (with secrets redacted)?
+5. Which upstream host/IP received the request?
+6. What trace/audit IDs correlate the event?
+7. Can this connector version be disabled globally or per tenant?
+8. Are other tenants/cells affected?
+
+# PART XXVI — CI/CD AND ENGINEERING WORKFLOW
+
+## 167. Recommended pull-request pipeline
+
+```text
+format/lint
+   ↓
+type check
+   ↓
+unit tests
+   ↓
+contract tests
+   ↓
+security/static analysis
+   ↓
+container build
+   ↓
+SBOM + vulnerability scan
+   ↓
+integration tests
+   ↓
+signed artifact
+```
+
+Compiler changes deserve special compatibility testing because a small normalization change can alter thousands of generated tool manifests.
+
+## 168. Golden-spec regression suite
+
+Maintain representative OpenAPI fixtures covering:
+
+- OpenAPI 3.0 and 3.1;
+- path/query/header parameters;
+- inherited parameters;
+- JSON request bodies;
+- security schemes;
+- unusual operation IDs;
+- missing servers;
+- `$ref` chains/cycles;
+- very large schemas;
+- malicious descriptions/URLs;
+- duplicate/colliding tool names.
+
+Store expected canonical manifests. Compiler releases diff generated output against those goldens.
+
+## 169. Release strategy
+
+Version the compiler independently from connector artifacts. Canary a new compiler on a sample of specs and compare manifests before changing the default. Existing published connector versions must continue to execute under their original semantics until explicitly migrated.
+
+# PART XXVII — PERFORMANCE ENGINEERING
+
+## 170. Compilation performance
+
+Compilation is mostly CPU/memory bound by parsing, reference resolution and schema normalization. Cache source fingerprints so identical specs do not require repeated work. Bound spec size, object count, reference depth and recursion to protect the control plane.
+
+## 171. Execution performance
+
+Use asynchronous I/O and connection pooling. Maintain pools by controlled upstream origin. Apply separate connect, read and total deadlines. Do not let an agent create unbounded fan-out; enforce concurrency budgets at tenant, workflow and connector levels.
+
+## 172. Tool discovery performance
+
+Do not put an entire enterprise connector catalog into every prompt. Index compact tool metadata and retrieve top candidates based on task semantics, tenant authorization, risk and context. A second-stage reranker can reduce ambiguity before the planner sees tool schemas.
+
+# PART XXVIII — APPLICATION INTEGRATION PATTERNS
+
+## 173. Muse integration
+
+A Muse-style agent should treat the connector platform as a governed capability provider:
+
+```text
+Muse planner
+   │
+   ├─ discover(query, tenant, context)
+   │        ↓
+   │    candidate tools
+   │
+   ├─ choose tool + arguments
+   │
+   └─ execute
+            │
+            ├─ policy decision
+            ├─ optional human approval
+            ├─ credential injection
+            └─ outbound call
+```
+
+The agent should never receive raw long-lived credentials. It should also never be trusted to label its own operation as safe.
+
+## 174. LangGraph integration
+
+Represent tool execution as a node whose state includes the selected connector version and tool. Route `APPROVAL_REQUIRED` to an approval node and resume after an approval artifact is available. Persist workflow checkpoints separately from connector registry state.
+
+```text
+plan → discover_tools → select_tool → execute
+                                  ↘ approval_required
+                                     ↓
+                                  approval
+                                     ↓
+                                  execute
+```
+
+## 175. MCP integration
+
+MCP is an adapter surface, not the internal storage model. Export name, description and JSON input schema from the immutable manifest. When the MCP tool is called, route execution back through the same policy/approval/credential/egress data plane; do not bypass governance with a second execution path.
+
+# PART XXIX — FAQ
+
+## 176. Why not simply use OpenAPI directly as tool definitions?
+
+Because an enterprise runtime needs normalization, stable identity, risk metadata, versioning, policy binding, provenance and execution controls. The manifest creates a governed boundary between an external specification and an internal agent capability.
+
+## 177. Why not generate Python for every endpoint?
+
+Generated executable code expands the trust surface and makes policy consistency, patching, sandboxing and provenance harder. A constrained IR handles common HTTP APIs with fewer execution semantics. Code generation can still exist as a separately sandboxed escape hatch for protocols that cannot be represented safely by the IR.
+
+## 178. Can it support GraphQL, gRPC or browser automation?
+
+Yes through additional compilers/adapters, but they should produce explicit governed capability models rather than being silently forced into HTTP/OpenAPI semantics. Each protocol has different risk, schema and execution requirements.
+
+## 179. Does the reference implementation persist connectors?
+
+No. The executable `registry.py` is in-memory. This is intentional and documented. Production persistence is a clear replacement seam rather than a pretend database abstraction that is never used.
+
+## 180. Is the reference approval mechanism production-ready?
+
+No. It demonstrates the enforcement point. Enterprise deployment requires signed, contextual, expiring approvals and a durable audit record.
+
+## 181. Is risk classification sufficient for security?
+
+No. Method/operation-name classification is only one signal. Production policy should include API ownership metadata, environment, data classification, endpoint-specific overrides, tenant policy, actor identity, argument/resource context and historical certification.
+
+## 182. How should credentials work?
+
+Store only credential references with connector configuration. At execution time, a broker validates tenant/actor/tool authorization and injects a short-lived credential as close to the outbound request as possible. Keep secret material out of prompts, manifests, logs and approval UIs.
+
+## 183. How do you handle breaking upstream API changes?
+
+Connector artifacts are immutable. Compile the new spec as a new version, run compatibility/contract tests, canary it, then update the active-version pointer. Existing workflows can pin a version when reproducibility matters.
+
+# PART XXX — GLOSSARY
+
+## 184. Core terms
+
+**Connector** — a governed representation of an external API exposed to agents.
+
+**Tool** — one callable operation within a connector.
+
+**OpenAPI** — a machine-readable description of an HTTP API used as compiler input.
+
+**IR / manifest** — the constrained intermediate representation produced by compilation.
+
+**Control plane** — APIs/services that ingest, validate, compile, version and publish connectors.
+
+**Data plane** — latency-sensitive path that authorizes and executes a published tool.
+
+**PEP** — policy enforcement point; the component that enforces an authorization decision.
+
+**PDP** — policy decision point; the service that evaluates policy inputs.
+
+**SSRF** — server-side request forgery; abuse of a server to reach unintended network destinations.
+
+**Approval artifact** — cryptographically trustworthy evidence that a human approved one bounded action.
+
+**Credential broker** — service that provides short-lived credentials to an authorized execution without exposing them to the agent.
+
+**Cell architecture** — partitioning tenants/workloads into semi-independent regional/service cells to constrain blast radius.
+
+**Golden spec** — representative OpenAPI fixture with a known expected compiled manifest used for regression testing.
