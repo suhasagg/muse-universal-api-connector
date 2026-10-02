@@ -1,0 +1,22 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: connector-builder}
+spec:
+  replicas: 3
+  selector: {matchLabels: {app: connector-builder}}
+  template:
+    metadata: {labels: {app: connector-builder}}
+    spec:
+      securityContext: {runAsNonRoot: true}
+      containers:
+      - name: api
+        image: your-registry/connector-builder:1.0.0
+        ports: [{containerPort: 8080}]
+        readinessProbe: {httpGet: {path: /healthz, port: 8080}, initialDelaySeconds: 3}
+        livenessProbe: {httpGet: {path: /healthz, port: 8080}, initialDelaySeconds: 10}
+        resources: {requests: {cpu: 250m, memory: 256Mi}, limits: {cpu: "1", memory: 1Gi}}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: connector-builder}
+spec: {selector: {app: connector-builder}, ports: [{port: 80, targetPort: 8080}]}
